@@ -1,0 +1,22 @@
+[package]
+name = "futures-shared-state-channel"
+edition = "2018"
+version = "0.1.0"
+authors = ["Seun Lanlege <seunlanlege@gmail.com>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/seunlanlege/futures-state-channel"
+documentation = "https://docs.rs/futures-state-channel"
+description = """
+Shared state using futures for synchronization.
+"""
+
+[dependencies]
+futures-core = "0.3.1"
+futures-sink = "0.3.1"
+futures-task = "0.3.1"
+crossbeam-queue = "0.2"
+
+[dev-dependencies]
+futures = "0.3"
+futures-executor = "0.3"
+futures-test = "0.3.1"
