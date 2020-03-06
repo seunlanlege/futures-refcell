@@ -11,9 +11,10 @@ Shared state using futures for synchronization.
 """
 
 [dependencies]
-futures-core = "0.3.1"
-futures-sink = "0.3.1"
-futures-task = "0.3.1"
+futures-core = "0.3.4"
+futures-sink = "0.3.4"
+futures-util = "0.3.4"
+futures-task = "0.3.4"
 crossbeam-queue = "0.2"
 
 [dev-dependencies]
