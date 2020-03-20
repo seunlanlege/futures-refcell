@@ -25,7 +25,7 @@ pub struct RefCell<T> {
 	/// flag to prevent new borrows from being created
 	blocked_writer: AtomicBool,
 	/// reader wakers
-	reader_wakers: Arc<Queue<AtomicWaker>>,
+	reader_wakers: Queue<AtomicWaker>,
 	/// writer waker
 	writer_wakers: Queue<AtomicWaker>,
 	/// inner value.
@@ -39,7 +39,7 @@ impl<T> RefCell<T> {
 		RefCell {
 			borrow: AtomicUsize::new(0),
 			blocked_writer: AtomicBool::new(false),
-			reader_wakers: Arc::new(Queue::new()),
+			reader_wakers: Queue::new(),
 			writer_wakers: Queue::new(),
 			value: UnsafeCell::new(value),
 		}
@@ -71,10 +71,9 @@ impl<T> RefCell<T> {
 	/// Immutably borrows the wrapped value.
 	#[inline]
 	fn poll_borrow(&self, context: &Context<'_>) -> Poll<AtomicRef<T>> {
-		// register the waker.
-		self.register_waker(context, &self.reader_wakers);
-
 		if self.blocked_writer.load(Ordering::Acquire) {
+			// register the waker.
+			self.register_waker(context, &self.reader_wakers);
 			return Poll::Pending
 		}
 
@@ -83,11 +82,12 @@ impl<T> RefCell<T> {
 
 		// whoops, there's a mutable borrow in progress.
 		if new & HIGH_BIT != 0 {
+			// register the waker.
+			self.register_waker(context, &self.reader_wakers);
 			return Poll::Pending;
 		}
 
-		let borrow = AtomicBorrowRef::new(&self.borrow, &self.writer_wakers);
-
+		let borrow = AtomicBorrowRef::new(&self);
 		return Poll::Ready(AtomicRef {
 			value: unsafe { &*self.value.get() },
 			borrow
@@ -154,28 +154,26 @@ const HIGH_BIT: usize = !(std::usize::MAX >> 1);
 const MAX_FAILED_BORROWS: usize = HIGH_BIT + (HIGH_BIT >> 1);
 
 struct AtomicBorrowRef<'b> {
-	borrow: &'b AtomicUsize,
-	writer_waker: &'b Queue<AtomicWaker>,
+	cell: &'b RefCell<T>,
 }
 
 impl<'b> AtomicBorrowRef<'b> {
 	#[inline]
 	fn new(
-		borrow: &'b AtomicUsize,
-		writer_waker: &'b Queue<AtomicWaker>
+		cell: &'b RefCell<T>,
 	) -> Self {
-		AtomicBorrowRef { borrow, writer_waker }
+		AtomicBorrowRef { cell }
 	}
 }
 
 impl<'b> Drop for AtomicBorrowRef<'b> {
 	#[inline]
 	fn drop(&mut self) {
-		let old = self.borrow.fetch_sub(1, Ordering::Release);
+		let old = self.cell.borrow.fetch_sub(1, Ordering::Release);
 		// so this is the last object holding a borrow,
 		// if there's a writer_waker in the queue, wake it.
 		if old == 0 {
-			if let Ok(waker) = self.writer_waker.pop() {
+			if let Ok(waker) = self.cell.writer_waker.pop() {
 				waker.wake()
 			}
 		}
@@ -184,6 +182,13 @@ impl<'b> Drop for AtomicBorrowRef<'b> {
 
 struct AtomicBorrowRefMut<'b, T> {
 	cell: &'b RefCell<T>,
+}
+
+impl<'b, T> AtomicBorrowRefMut<'b, T> {
+	#[inline]
+	fn new(cell: &'b RefCell<T>) -> Self {
+		Self { cell }
+	}
 }
 
 impl<'b, T> Drop for AtomicBorrowRefMut<'b, T> {
@@ -197,13 +202,6 @@ impl<'b, T> Drop for AtomicBorrowRefMut<'b, T> {
 			// we're done mutating the value, wake up all readers.
 			self.cell.wake_readers()
 		}
-	}
-}
-
-impl<'b, T> AtomicBorrowRefMut<'b, T> {
-	#[inline]
-	fn new(cell: &'b RefCell<T>) -> Self {
-		Self { cell }
 	}
 }
 
